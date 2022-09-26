@@ -1,11 +1,11 @@
 [package]
 name = "approval-receiver"
-version = "0.0.1"
+version = "0.1.0"
 authors = ["Near Inc <hello@nearprotocol.com>"]
 edition = "2021"
 
 [lib]
-crate-type = ["cdylib"]
+crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 near-sdk = { path = "../../../near-sdk" }
