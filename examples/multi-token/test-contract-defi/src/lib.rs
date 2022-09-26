@@ -4,7 +4,7 @@ Some hypothetical DeFi contract that will do smart things with the transferred t
 use near_sdk::borsh::{self, BorshDeserialize, BorshSerialize};
 use near_sdk::json_types::U128;
 use near_sdk::{
-    env, ext_contract, log, near_bindgen, require, AccountId, Balance, Gas, PanicOnDefault,
+    env, log, near_bindgen, require, AccountId, Balance, Gas, PanicOnDefault,
     PromiseOrValue,
 };
 use near_contract_standards::multi_token::core::MultiTokenReceiver;
@@ -14,22 +14,10 @@ const BASE_GAS: u64 = 5_000_000_000_000;
 const PROMISE_CALL: u64 = 5_000_000_000_000;
 const GAS_FOR_MT_ON_TRANSFER: Gas = Gas(BASE_GAS + PROMISE_CALL);
 
-const NO_DEPOSIT: Balance = 0;
-
 #[near_bindgen]
 #[derive(BorshDeserialize, BorshSerialize, PanicOnDefault)]
 pub struct DeFi {
     multi_token_account_id: AccountId,
-}
-
-// Defining cross-contract interface. This allows to create a new promise.
-#[ext_contract(ext_self)]
-pub trait ValueReturnTrait {
-    fn value_please(
-        &self,
-        num_tokens: usize,
-        amount_to_return: String,
-    ) -> PromiseOrValue<Vec<U128>>;
 }
 
 // Have to repeat the same trait for our own implementation.
@@ -87,14 +75,10 @@ impl MultiTokenReceiver for DeFi {
             _ => {
                 let prepaid_gas = env::prepaid_gas();
                 let account_id = env::current_account_id();
-                ext_self::value_please(
-                    token_ids.len(),
-                    msg,
-                    account_id,
-                    NO_DEPOSIT,
-                    prepaid_gas - GAS_FOR_MT_ON_TRANSFER,
-                )
-                .into()
+                Self::ext(account_id)
+                    .with_static_gas(prepaid_gas - GAS_FOR_MT_ON_TRANSFER)
+                    .value_please(token_ids.len(), msg)
+                    .into()
             }
         }
     }

@@ -1,46 +1,23 @@
-use crate::multi_token::core::{MultiTokenCore, MultiTokenResolver};
-use crate::multi_token::events::{MtMint, MtTransfer};
-use crate::multi_token::metadata::TokenMetadata;
-use crate::multi_token::token::{ApprovalContainer, ClearedApproval, Token, TokenId};
-use crate::multi_token::utils::{
-    check_and_apply_approval, expect_approval, refund_deposit_to_account, Entity,
+use near_sdk::{
+    AccountId, assert_one_yocto, Balance, BorshStorageKey, CryptoHash, env, Gas,
+    IntoStorageKey, log, PromiseOrValue, PromiseResult, require, StorageUsage,
 };
 use near_sdk::borsh::{self, BorshDeserialize, BorshSerialize};
 use near_sdk::collections::{LookupMap, TreeMap, UnorderedMap, UnorderedSet};
 use near_sdk::json_types::U128;
-use near_sdk::{
-    assert_one_yocto, env, ext_contract, log, require, AccountId, Balance, BorshStorageKey,
-    CryptoHash, Gas, IntoStorageKey, PromiseOrValue, PromiseResult, StorageUsage,
+
+use crate::multi_token::core::MultiTokenCore;
+use crate::multi_token::core::receiver::{ext_mt_receiver};
+use crate::multi_token::core::resolver::{ext_mt_resolver, MultiTokenResolver};
+use crate::multi_token::events::{MtMint, MtTransfer};
+use crate::multi_token::metadata::TokenMetadata;
+use crate::multi_token::token::{ApprovalContainer, ClearedApproval, Token, TokenId};
+use crate::multi_token::utils::{
+    check_and_apply_approval, Entity, expect_approval, refund_deposit_to_account,
 };
 
 pub const GAS_FOR_RESOLVE_TRANSFER: Gas = Gas(15_000_000_000_000);
 pub const GAS_FOR_MT_TRANSFER_CALL: Gas = Gas(50_000_000_000_000 + GAS_FOR_RESOLVE_TRANSFER.0);
-
-const NO_DEPOSIT: Balance = 0;
-
-#[ext_contract(ext_self)]
-trait MultiTokenResolver {
-    fn mt_resolve_transfer(
-        &mut self,
-        previous_owner_ids: Vec<AccountId>,
-        receiver_id: AccountId,
-        token_ids: Vec<TokenId>,
-        amounts: Vec<U128>,
-        approvals: Option<Vec<Option<Vec<ClearedApproval>>>>,
-    ) -> Vec<U128>;
-}
-
-#[ext_contract(ext_multi_token_receiver)]
-pub trait MultiTokenReceiver {
-    fn mt_on_transfer(
-        &mut self,
-        sender_id: AccountId,
-        previous_owner_ids: Vec<AccountId>,
-        token_ids: Vec<TokenId>,
-        amounts: Vec<U128>,
-        msg: String,
-    ) -> PromiseOrValue<Vec<U128>>;
-}
 
 /// Implementation of the multi-token standard
 /// Allows to include NEP-245 compatible tokens to any contract.
@@ -107,11 +84,11 @@ impl MultiToken {
         enumeration_prefix: Option<S>,
         approval_prefix: Option<T>,
     ) -> Self
-    where
-        Q: IntoStorageKey,
-        R: IntoStorageKey,
-        S: IntoStorageKey,
-        T: IntoStorageKey,
+        where
+            Q: IntoStorageKey,
+            R: IntoStorageKey,
+            S: IntoStorageKey,
+            T: IntoStorageKey,
     {
         let (approvals_by_token_id, next_approval_id_by_id) = if let Some(prefix) = approval_prefix
         {
@@ -276,7 +253,7 @@ impl MultiToken {
             authorized_id: Some(original_sender_id).filter(|id| *id == sender_id),
             memo: None,
         }
-        .emit();
+            .emit();
 
         (sender_id.to_owned(), old_approvals)
     }
@@ -301,7 +278,7 @@ impl MultiToken {
             amounts: &[&token.supply.to_string()],
             memo: None,
         }
-        .emit();
+            .emit();
 
         token
     }
@@ -436,27 +413,31 @@ impl MultiTokenCore for MultiToken {
         let (old_owner, old_approvals) =
             self.internal_transfer(&sender_id, &receiver_id, &token_id, amount_to_send, &approval);
 
-        ext_multi_token_receiver::mt_on_transfer(
-            sender_id,
-            vec![old_owner.clone()],
-            vec![token_id.clone()],
-            vec![amount],
-            msg,
-            receiver_id.clone(),
-            NO_DEPOSIT,
-            env::prepaid_gas() - GAS_FOR_MT_TRANSFER_CALL,
+        let receiver_gas = env::prepaid_gas()
+            .0
+            .checked_sub(GAS_FOR_MT_TRANSFER_CALL.0)
+            .unwrap_or_else(|| env::panic_str("Prepaid gas overflow"));
+
+        ext_mt_receiver::ext(receiver_id.clone())
+            .with_static_gas(receiver_gas.into())
+            .mt_on_transfer(
+                sender_id.clone(),
+                vec![old_owner.clone()],
+                vec![token_id.clone()],
+                vec![amount],
+                msg.clone(),
+            ).then(
+            ext_mt_resolver::ext(env::current_account_id())
+                .with_static_gas(GAS_FOR_RESOLVE_TRANSFER)
+                .mt_resolve_transfer(
+                    vec![old_owner],
+                    receiver_id,
+                    vec![token_id],
+                    vec![amount],
+                    Some(vec![old_approvals]),
+                )
         )
-        .then(ext_self::mt_resolve_transfer(
-            vec![old_owner],
-            receiver_id,
-            vec![token_id],
-            vec![amount],
-            Some(vec![old_approvals]),
-            env::current_account_id(),
-            NO_DEPOSIT,
-            GAS_FOR_RESOLVE_TRANSFER,
-        ))
-        .into()
+            .into()
     }
 
     fn mt_batch_transfer_call(
@@ -485,27 +466,31 @@ impl MultiTokenCore for MultiToken {
             approvals,
         );
 
-        ext_multi_token_receiver::mt_on_transfer(
-            sender_id,
-            old_owners.clone(),
-            token_ids.clone(),
-            amounts.clone(),
-            msg,
-            receiver_id.clone(),
-            NO_DEPOSIT,
-            env::prepaid_gas() - GAS_FOR_MT_TRANSFER_CALL,
-        )
-        .then(ext_self::mt_resolve_transfer(
-            old_owners,
-            receiver_id,
-            token_ids,
-            amounts,
-            Some(old_approvals),
-            env::current_account_id(),
-            NO_DEPOSIT,
-            GAS_FOR_RESOLVE_TRANSFER,
-        ))
-        .into()
+        let receiver_gas = env::prepaid_gas()
+            .0
+            .checked_sub(GAS_FOR_MT_TRANSFER_CALL.into())
+            .unwrap_or_else(|| env::panic_str("Prepaid gas overflow"));
+
+        ext_mt_receiver::ext(receiver_id.clone())
+            .with_static_gas(receiver_gas.into())
+            .mt_on_transfer(
+                sender_id,
+                old_owners.clone(),
+                token_ids.clone(),
+                amounts.clone(),
+                msg,
+            ).then(
+                ext_mt_resolver::ext(env::current_account_id())
+                    .with_static_gas(GAS_FOR_RESOLVE_TRANSFER)
+                    .mt_resolve_transfer(
+                        old_owners,
+                        receiver_id,
+                        token_ids,
+                        amounts,
+                        Some(old_approvals),
+                    )
+            )
+            .into()
     }
 
     fn mt_token(&self, token_ids: Vec<TokenId>) -> Vec<Option<Token>> {
@@ -653,8 +638,8 @@ impl MultiTokenResolver for MultiToken {
             amounts,
             approvals,
         )
-        .iter()
-        .map(|&x| x.into())
-        .collect()
+            .iter()
+            .map(|&x| x.into())
+            .collect()
     }
 }

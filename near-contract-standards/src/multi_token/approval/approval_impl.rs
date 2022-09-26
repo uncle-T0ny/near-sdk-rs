@@ -1,24 +1,15 @@
-use super::MultiTokenApproval;
-use crate::multi_token::{
-    core::{MultiToken, GAS_FOR_MT_TRANSFER_CALL},
-    token::{Approval, TokenId},
-    utils::{bytes_for_approved_account_id, expect_approval, refund_deposit, Entity},
-};
-use near_sdk::{assert_one_yocto, env, ext_contract, require, AccountId, Balance, Promise};
 use std::collections::HashMap;
 
-const NO_DEPOSIT: Balance = 0;
+use near_sdk::{AccountId, assert_one_yocto, Balance, env, Gas, Promise, require};
 
-#[ext_contract(ext_approval_receiver)]
-pub trait MultiTokenReceiver {
-    fn mt_on_approve(
-        &mut self,
-        tokens: Vec<TokenId>,
-        owner_id: AccountId,
-        approval_ids: Vec<u64>,
-        msg: String,
-    );
-}
+use crate::multi_token::{
+    core::{GAS_FOR_MT_TRANSFER_CALL, MultiToken},
+    token::{Approval, TokenId},
+    utils::{bytes_for_approved_account_id, Entity, expect_approval, refund_deposit},
+};
+use crate::multi_token::approval::receiver::{ext_approval_receiver};
+
+use super::MultiTokenApproval;
 
 impl MultiTokenApproval for MultiToken {
     fn mt_approve(
@@ -80,16 +71,21 @@ impl MultiTokenApproval for MultiToken {
         refund_deposit(used_storage);
 
         // if given `msg`, schedule call to `mt_on_approve` and return it. Else, return None.
+        let receiver_gas: Gas = env::prepaid_gas()
+            .0
+            .checked_sub(GAS_FOR_MT_TRANSFER_CALL.into()) // todo: change to ga for approve
+            .unwrap_or_else(|| env::panic_str("Prepaid gas overflow"))
+            .into();
+
         msg.map(|msg| {
-            ext_approval_receiver::mt_on_approve(
-                token_ids,
-                approver_id,
-                new_approval_ids,
-                msg,
-                grantee_id,
-                NO_DEPOSIT,
-                env::prepaid_gas() - GAS_FOR_MT_TRANSFER_CALL,
-            )
+            ext_approval_receiver::ext(grantee_id)
+                .with_static_gas(receiver_gas)
+                .mt_on_approve(
+                    token_ids,
+                    approver_id,
+                    new_approval_ids,
+                    msg,
+                )
         })
     }
 

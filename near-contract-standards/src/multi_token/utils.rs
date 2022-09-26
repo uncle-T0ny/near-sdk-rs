@@ -46,12 +46,12 @@ pub fn check_and_apply_approval(
     amount: Balance,
 ) -> Vec<(AccountId, u64, U128)> {
     let by_sender_id =
-        approvals_by_account_id.remove(account_id).unwrap_or_else(|| panic!("Unauthorized"));
-    let stored_approval = by_sender_id.get(sender_id).unwrap_or_else(|| panic!("Unauthorized"));
+        approvals_by_account_id.remove(account_id).unwrap_or_else(|| panic!("No approvals for {}", account_id));
+    let stored_approval = by_sender_id.get(sender_id).unwrap_or_else(|| panic!("No approval for {} from {}", account_id, sender_id));
 
     require!(
         stored_approval.approval_id.eq(approval_id) && stored_approval.amount.eq(&amount),
-        "Unauthorized"
+        "Invalid approval_id or amount"
     );
 
     // Given that we are consuming the approval, remove all other approvals granted to that account for that token.
