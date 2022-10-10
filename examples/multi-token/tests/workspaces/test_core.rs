@@ -2,12 +2,12 @@ use near_contract_standards::multi_token::token::Token;
 use near_sdk::ONE_YOCTO;
 use near_sdk::json_types::U128;
 use workspaces::AccountId;
+use near_contract_standards::storage_management::StorageBalanceBounds;
 
 use crate::utils::{helper_mint, init, register_user_for_token};
 
 #[tokio::test]
 async fn simulate_mt_transfer_and_call() -> anyhow::Result<()> {
-    
     // Setup MT contract, user, and DeFi contract.
     let worker = workspaces::sandbox().await?;
     let (mt, alice, _, defi) = init(&worker).await?;
@@ -28,9 +28,12 @@ async fn simulate_mt_transfer_and_call() -> anyhow::Result<()> {
         "desc2".to_string(),
     ).await?;
 
+    let balance_bounds = mt.view("storage_balance_bounds", vec![])
+        .await?
+        .json::<StorageBalanceBounds>()?;
+
     // Register defi account; alice (the token owner) was already registered during the mint.
-    register_user_for_token(&mt, defi.id(), token_1.token_id.clone()).await?;
-    register_user_for_token(&mt, defi.id(), token_2.token_id.clone()).await?;
+    register_user_for_token(&mt, defi.id(), balance_bounds.min.into()).await?;
 
     // Transfer some tokens using transfer_and_call to hit DeFi contract with XCC.
     let res = alice

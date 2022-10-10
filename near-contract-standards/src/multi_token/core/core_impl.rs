@@ -7,13 +7,13 @@ use near_sdk::collections::{LookupMap, TreeMap, UnorderedMap, UnorderedSet};
 use near_sdk::json_types::U128;
 
 use crate::multi_token::core::MultiTokenCore;
-use crate::multi_token::core::receiver::{ext_mt_receiver};
+use crate::multi_token::core::receiver::ext_mt_receiver;
 use crate::multi_token::core::resolver::{ext_mt_resolver, MultiTokenResolver};
 use crate::multi_token::events::{MtMint, MtTransfer};
 use crate::multi_token::metadata::TokenMetadata;
-use crate::multi_token::token::{ApprovalContainer, ClearedApproval, Token, TokenId};
+use crate::multi_token::token::{Approval, ApprovalContainer, ClearedApproval, Token, TokenId};
 use crate::multi_token::utils::{
-    check_and_apply_approval, Entity, expect_approval, refund_deposit_to_account,
+    Entity, expect_approval, refund_deposit_to_account,
 };
 
 pub const GAS_FOR_RESOLVE_TRANSFER: Gas = Gas(15_000_000_000_000);
@@ -30,6 +30,15 @@ pub const GAS_FOR_MT_TRANSFER_CALL: Gas = Gas(50_000_000_000_000 + GAS_FOR_RESOL
 pub struct MultiToken {
     /// Owner of contract
     pub owner_id: AccountId,
+
+    /// AccountID -> Near balance for storage.
+    pub accounts_storage: LookupMap<AccountId, Balance>,
+
+    /// The storage size in bytes for one account.
+    pub account_storage_usage: StorageUsage,
+
+    /// The storage size in bytes for one token.
+    pub storage_usage_per_token: StorageUsage,
 
     /// How much storage takes every token
     pub extra_storage_in_bytes_per_emission: StorageUsage,
@@ -48,7 +57,6 @@ pub struct MultiToken {
 
     /// Balance of user for given token
     pub balances_per_token: UnorderedMap<TokenId, LookupMap<AccountId, u128>>,
-
     /// Approvals granted for a given token.
     /// Nested maps are structured as: token_id -> owner_id -> grantee_id -> (approval_id, amount)
     pub approvals_by_token_id: Option<ApprovalContainer>,
@@ -62,10 +70,11 @@ pub struct MultiToken {
 
 #[derive(BorshStorageKey, BorshSerialize)]
 pub enum StorageKey {
+    Accounts,
+    AccountTokens { account_id_hash: CryptoHash },
     PerOwner,
     TokensPerOwner { account_hash: Vec<u8> },
     TokenPerOwnerInner { account_id_hash: CryptoHash },
-    OwnerById,
     OwnerByIdInner { account_id_hash: CryptoHash },
     TokenMetadata,
     Approvals,
@@ -78,7 +87,7 @@ pub enum StorageKey {
 
 impl MultiToken {
     pub fn new<Q, R, S, T>(
-        _owner_by_id_prefix: Q,
+        owner_by_id_prefix: Q,
         owner_id: AccountId,
         token_metadata_prefix: Option<R>,
         enumeration_prefix: Option<S>,
@@ -101,18 +110,56 @@ impl MultiToken {
             (None, None)
         };
 
-        Self {
+        let mut this = Self {
             owner_id,
             extra_storage_in_bytes_per_emission: 0,
-            owner_by_id: TreeMap::new(StorageKey::OwnerById),
+            owner_by_id: TreeMap::new(owner_by_id_prefix),
             total_supply: LookupMap::new(StorageKey::TotalSupply { supply: 0 }),
             token_metadata_by_id: token_metadata_prefix.map(LookupMap::new),
             tokens_per_owner: enumeration_prefix.map(LookupMap::new),
+            accounts_storage: LookupMap::new(StorageKey::Accounts),
             balances_per_token: UnorderedMap::new(StorageKey::Balances),
             approvals_by_token_id,
             next_approval_id_by_id,
             next_token_id: 0,
-        }
+            account_storage_usage: 0,
+            storage_usage_per_token: 0,
+        };
+
+        this.measure_account_storage_usage();
+        this.measure_account_storage_usage_per_token();
+
+        this
+    }
+
+    fn measure_account_storage_usage_per_token(&mut self) {
+        let tmp_token_id = u64::MAX.to_string();
+        let mut user_token_balance = LookupMap::new(
+            StorageKey::BalancesInner { token_id: env::sha256(tmp_token_id.as_bytes()) }
+        );
+        let tmp_account_id = AccountId::new_unchecked("a".repeat(64));
+
+        let initial_storage_usage = env::storage_usage();
+
+        user_token_balance.insert(&tmp_account_id, &u128::MAX);
+
+        // todo: add tokens_per_owner
+        self.balances_per_token.insert(&tmp_token_id, &user_token_balance);
+        self.storage_usage_per_token = env::storage_usage() - initial_storage_usage;
+
+        self.balances_per_token.remove(&tmp_token_id);
+    }
+
+    fn measure_account_storage_usage(&mut self) {
+        let tmp_account_id = AccountId::new_unchecked("a".repeat(64));
+        let initial_storage_usage = env::storage_usage();
+
+        // storage in NEAR's per account
+        self.accounts_storage.insert(&tmp_account_id, &u128::MAX);
+
+        self.account_storage_usage = env::storage_usage() - initial_storage_usage;
+
+        self.accounts_storage.remove(&tmp_account_id);
     }
 
     /// Used to get balance of specified account in specified token
@@ -121,17 +168,12 @@ impl MultiToken {
         token_id: &TokenId,
         account_id: &AccountId,
     ) -> Balance {
-        match self
+        self
             .balances_per_token
             .get(token_id)
             .expect("This token does not exist")
             .get(account_id)
-        {
-            Some(balance) => balance,
-            None => {
-                env::panic_str(format!("The account {} is not registered", account_id).as_str())
-            }
-        }
+            .unwrap_or(0)
     }
 
     /// Add to balance of user specified amount
@@ -217,19 +259,12 @@ impl MultiToken {
         // Safety checks
         require!(amount > 0, "Transferred amounts must be greater than 0");
 
-        let (sender_id, old_approvals) = if let Some((account_id, approval_id)) = approval {
-            // If an approval was provided, ensure it meets requirements.
-            let approvals = expect_approval(self.approvals_by_token_id.as_mut(), Entity::Contract);
-
-            let mut token_approvals = approvals
-                .get(token_id)
-                .unwrap_or_else(|| panic!("Approvals not supported for token {}", token_id));
-
+        let (sender_id, old_approvals) = if let Some((owner_id, approval_id)) = approval {
             (
-                account_id,
-                Some(check_and_apply_approval(
-                    &mut token_approvals,
-                    account_id,
+                owner_id,
+                Some(self.check_and_apply_approval(
+                    token_id,
+                    owner_id,
                     original_sender_id,
                     approval_id,
                     amount,
@@ -244,6 +279,7 @@ impl MultiToken {
 
         self.internal_withdraw(token_id, sender_id, amount);
         self.internal_deposit(token_id, receiver_id, amount);
+        self.assert_storage_usage(receiver_id);
 
         MtTransfer {
             old_owner_id: sender_id,
@@ -321,12 +357,12 @@ impl MultiToken {
         self.owner_by_id.insert(&token_id, &owner_id);
 
         // Insert new metadata
-        self.token_metadata_by_id
+        self.token_metadata_by_id // todo: we insert metadata even if it's None?
             .as_mut()
             .and_then(|by_id| by_id.insert(&token_id, &token_metadata.clone().unwrap()));
 
         // Insert new supply
-        let supply = supply.unwrap_or(0);
+        let supply = supply.unwrap_or(0); // todo: supply by default is 0? Is it correct?
         self.total_supply.insert(&token_id, &supply);
 
         // Insert new balance
@@ -353,6 +389,60 @@ impl MultiToken {
         }
 
         Token { token_id, owner_id, supply, metadata: token_metadata }
+    }
+
+    // validate that an approval exists with matching approval_id and sufficient balance.
+    pub fn check_and_apply_approval(
+        &mut self,
+        token_id: &TokenId,
+        owner_id: &AccountId,
+        grantee_id: &AccountId,
+        approval_id: &u64,
+        amount: Balance,
+    ) -> Vec<(AccountId, u64, U128)> {
+        // If an approval was provided, ensure it meets requirements.
+        let approvals = expect_approval(self.approvals_by_token_id.as_mut(), Entity::Contract);
+
+        let mut by_owner = expect_approval(approvals.get(token_id), Entity::Token);
+
+        let mut by_sender_id = by_owner
+            .get(owner_id)
+            .unwrap_or_else(|| panic!("No approvals for {}", owner_id))
+            .clone();
+
+        let stored_approval: Approval = by_sender_id.get(grantee_id)
+            .unwrap_or_else(|| panic!("No approval for {} from {}", grantee_id, owner_id))
+            .clone();
+
+        require!(
+            stored_approval.approval_id.eq(approval_id),
+            "Invalid approval_id"
+        );
+
+        let new_approval_amount = stored_approval.amount
+            .checked_sub(amount)
+            .expect("Not enough approval amount for transfer");
+
+        if new_approval_amount == 0 {
+            by_sender_id.remove(grantee_id);
+        } else {
+            by_sender_id.insert(grantee_id.clone(), Approval {
+                approval_id: approval_id.clone(),
+                amount: new_approval_amount,
+            });
+        }
+
+        by_owner.insert(owner_id.clone(), by_sender_id.clone());
+
+        approvals.insert(token_id, &by_owner);
+
+        // Given that we are consuming the approval, remove all other approvals granted to that account for that token.
+        // The user will need to generate fresh approvals as required.
+        // Return the now-deleted approvals, so that caller may restore them in case of revert.
+        by_sender_id
+            .into_iter()
+            .map(|(key, approval)| (key.clone(), approval.approval_id, U128(approval.amount)))
+            .collect()
     }
 }
 
@@ -480,16 +570,16 @@ impl MultiTokenCore for MultiToken {
                 amounts.clone(),
                 msg,
             ).then(
-                ext_mt_resolver::ext(env::current_account_id())
-                    .with_static_gas(GAS_FOR_RESOLVE_TRANSFER)
-                    .mt_resolve_transfer(
-                        old_owners,
-                        receiver_id,
-                        token_ids,
-                        amounts,
-                        Some(old_approvals),
-                    )
-            )
+            ext_mt_resolver::ext(env::current_account_id())
+                .with_static_gas(GAS_FOR_RESOLVE_TRANSFER)
+                .mt_resolve_transfer(
+                    old_owners,
+                    receiver_id,
+                    token_ids,
+                    amounts,
+                    Some(old_approvals),
+                )
+        )
             .into()
     }
 

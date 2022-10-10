@@ -3,22 +3,24 @@ use workspaces::{Account, AccountId, Contract, DevNetwork, Worker};
 use near_contract_standards::multi_token::{
     metadata::{TokenMetadata},
 };
-use near_contract_standards::multi_token::token::{Token, TokenId};
+use near_contract_standards::multi_token::token::{Token};
 use near_sdk::{Balance};
 
 pub async fn register_user_for_token(
     contract: &Contract,
     account_id: &AccountId,
-    token_id: TokenId,
+    deposit: u128,
 ) -> anyhow::Result<()> {
-    let res = contract
-        .call("register")
-        .args_json((token_id.clone(), account_id))
+    let res = contract.call("storage_deposit")
+        .args_json((
+            account_id,
+            Some(false),
+        ))
         .gas(300_000_000_000_000)
+        .deposit(deposit)
         .transact()
         .await?;
     assert!(res.is_success());
-
     Ok(())
 }
 
@@ -45,7 +47,7 @@ pub async fn helper_mint(
 
     let res = mt_contract
         .call("mt_mint")
-        .args_json((owner_id, token_md, amount))
+        .args_json((owner_id, token_md, amount.to_string()))
         .gas(300_000_000_000_000)
         .deposit(parse_near!("7 mN"))
         .transact()

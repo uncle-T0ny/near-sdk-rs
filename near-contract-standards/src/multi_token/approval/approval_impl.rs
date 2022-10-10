@@ -15,7 +15,7 @@ impl MultiTokenApproval for MultiToken {
     fn mt_approve(
         &mut self,
         token_ids: Vec<TokenId>,
-        amounts: Vec<Balance>,
+        amounts: Vec<Balance>, // todo: Balance raplace with U128
         grantee_id: AccountId,
         msg: Option<String>,
     ) -> Option<Promise> {
@@ -77,6 +77,7 @@ impl MultiTokenApproval for MultiToken {
             .unwrap_or_else(|| env::panic_str("Prepaid gas overflow"))
             .into();
 
+        // todo: check if msg is empty but not None
         msg.map(|msg| {
             ext_approval_receiver::ext(grantee_id)
                 .with_static_gas(receiver_gas)
@@ -142,6 +143,7 @@ impl MultiTokenApproval for MultiToken {
             "token_ids and approval_ids must have equal size"
         );
 
+        // todo: should be a view function, we need to add a parametr owner_id
         let owner_id = env::predecessor_account_id();
         let by_token = expect_approval(self.approvals_by_token_id.as_ref(), Entity::Contract);
 

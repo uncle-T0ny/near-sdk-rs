@@ -1,7 +1,7 @@
 use near_sdk::borsh::{self, BorshDeserialize, BorshSerialize};
-use near_sdk::collections::LazyOption;
+use near_sdk::collections::{LazyOption};
 use near_sdk::json_types::U128;
-use near_sdk::Promise;
+use near_sdk::{Promise};
 use near_sdk::{
     env, near_bindgen, require, AccountId, Balance, BorshStorageKey, PanicOnDefault, PromiseOrValue,
 };
@@ -34,8 +34,8 @@ impl ExampleMTContract {
     pub fn new_default_meta(owner_id: AccountId) -> Self {
         let metadata = MtContractMetadata {
             spec: MT_METADATA_SPEC.to_string(),
-            name: "Test".to_string(),
-            symbol: "OMG".to_string(),
+            name: "Example NEAR multi token".to_string(),
+            symbol: "EXAMPLE".to_string(),
             icon: None,
             base_uri: None,
             reference: None,
@@ -67,7 +67,7 @@ impl ExampleMTContract {
         &mut self,
         token_owner_id: AccountId,
         token_metadata: TokenMetadata,
-        supply: Balance,
+        supply: U128,
     ) -> Token {
         // Only the owner of the MT contract can perform this operation
         assert_eq!(
@@ -77,17 +77,14 @@ impl ExampleMTContract {
             env::predecessor_account_id(),
             self.tokens.owner_id
         );
-        self.tokens.internal_mint(token_owner_id, Some(supply), Some(token_metadata), None)
-    }
-
-    pub fn register(&mut self, token_id: TokenId, account_id: AccountId) {
-        self.tokens.internal_register_account(&token_id, &account_id)
+        self.tokens.internal_mint(token_owner_id, Some(supply.into()), Some(token_metadata), None)
     }
 }
 
 near_contract_standards::impl_multi_token_core!(ExampleMTContract, tokens);
 near_contract_standards::impl_multi_token_approval!(ExampleMTContract, tokens);
 near_contract_standards::impl_multi_token_enumeration!(ExampleMTContract, tokens);
+near_contract_standards::impl_multi_token_storage!(ExampleMTContract, tokens);
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
@@ -101,7 +98,7 @@ mod tests {
             description: Some(description),
             media: None,
             media_hash: None,
-            issued_at: Some(String::from("123456")),
+            issued_at: None,
             expires_at: None,
             starts_at: None,
             updated_at: None,
@@ -117,7 +114,6 @@ mod tests {
         set_caller(&mut context, 0);
         let mut contract = ExampleMTContract::new_default_meta(accounts(0));
         let (token, _) = init_tokens(&mut contract);
-        contract.register(token.token_id.clone(), accounts(1));
 
         // Initial balances are what we expect.
         assert_eq!(
@@ -133,6 +129,12 @@ mod tests {
 
         // Transfer some tokens
         testing_env!(context.attached_deposit(1).build());
+        // emulate storage_deposit
+        contract.tokens.accounts_storage.insert(
+            &accounts(1),
+            &contract.tokens.storage_balance_bounds().min.into(),
+        );
+
         contract.mt_transfer(accounts(1), token.token_id.clone(), 4.into(), None, None);
 
         // Transfer should have succeeded.
@@ -149,6 +151,7 @@ mod tests {
 
         // Transfer some of the tokens back to original owner.
         set_caller(&mut context, 1);
+
         contract.mt_transfer(accounts(0), token.token_id.clone(), 3.into(), None, None);
 
         assert_eq!(
@@ -170,9 +173,11 @@ mod tests {
         set_caller(&mut context, 0);
         let mut contract = ExampleMTContract::new_default_meta(accounts(0));
         let (token, _) = init_tokens(&mut contract);
-        contract.register(token.token_id.clone(), accounts(1));
         testing_env!(context.attached_deposit(1).build());
-
+        contract.tokens.accounts_storage.insert(
+            &accounts(1),
+            &contract.tokens.storage_balance_bounds().min.into(),
+        );
         contract.mt_transfer(accounts(1), token.token_id.clone(), U128(0), None, None)
     }
 
@@ -183,9 +188,11 @@ mod tests {
         set_caller(&mut context, 0);
         let mut contract = ExampleMTContract::new_default_meta(accounts(0));
         let (token, _) = init_tokens(&mut contract);
-        contract.register(token.token_id.clone(), accounts(1));
         testing_env!(context.attached_deposit(1).build());
-
+        contract.tokens.accounts_storage.insert(
+            &accounts(1),
+            &contract.tokens.storage_balance_bounds().min.into(),
+        );
         // account(0) has only 2000 of token.
         contract.mt_transfer(accounts(1), token.token_id.clone(), U128(3000), None, None)
     }
@@ -197,20 +204,21 @@ mod tests {
         set_caller(&mut context, 0);
         let mut contract = ExampleMTContract::new_default_meta(accounts(0));
         let (token, _) = init_tokens(&mut contract);
-        contract.register(token.token_id.clone(), accounts(1));
+        contract.tokens.accounts_storage.insert(
+            &accounts(1),
+            &contract.tokens.storage_balance_bounds().min.into(),
+        );
         contract.mt_transfer(accounts(1), token.token_id.clone(), U128(1000), None, None)
     }
 
     #[test]
-    #[should_panic(expected = "The account charlie is not registered")]
+    #[should_panic(expected = "The account is not registered")]
     fn test_receiver_must_be_registered() {
         let mut context = VMContextBuilder::new();
         set_caller(&mut context, 0);
         let mut contract = ExampleMTContract::new_default_meta(accounts(0));
         let (token, _) = init_tokens(&mut contract);
-        contract.register(token.token_id.clone(), accounts(1));
         testing_env!(context.attached_deposit(1).build());
-
         contract.mt_transfer(accounts(2), token.token_id.clone(), U128(100), None, None)
     }
 
@@ -221,9 +229,7 @@ mod tests {
         set_caller(&mut context, 0);
         let mut contract = ExampleMTContract::new_default_meta(accounts(0));
         let (token, _) = init_tokens(&mut contract);
-        contract.register(token.token_id.clone(), accounts(1));
         testing_env!(context.attached_deposit(1).build());
-
         contract.mt_transfer(accounts(0), token.token_id.clone(), U128(100), None, None)
     }
 
@@ -235,11 +241,12 @@ mod tests {
 
         let (quote_token, base_token) = init_tokens(&mut contract);
 
-        contract.register(quote_token.token_id.clone(), accounts(1));
-        contract.register(base_token.token_id.clone(), accounts(1));
-
         testing_env!(context.attached_deposit(1).build());
 
+        contract.tokens.accounts_storage.insert(
+            &accounts(1),
+            &(contract.tokens.storage_balance_bounds().min.0 * 2),
+        );
         // Perform the transfers
         contract.mt_batch_transfer(
             accounts(1),
@@ -281,10 +288,11 @@ mod tests {
 
         let (quote_token, base_token) = init_tokens(&mut contract);
 
-        contract.register(quote_token.token_id.clone(), accounts(1));
-        contract.register(base_token.token_id.clone(), accounts(1));
         testing_env!(context.attached_deposit(1).build());
-
+        contract.tokens.accounts_storage.insert(
+            &accounts(1),
+            &(contract.tokens.storage_balance_bounds().min.0 * 2),
+        );
         contract.mt_batch_transfer(
             accounts(1),
             vec![quote_token.token_id.clone(), base_token.token_id.clone()],
@@ -302,8 +310,6 @@ mod tests {
 
         let (quote_token, base_token) = init_tokens(&mut contract);
 
-        contract.register(quote_token.token_id.clone(), accounts(1));
-        contract.register(base_token.token_id.clone(), accounts(1));
 
         // Initially, Account 1 is not approved.
         testing_env!(context.attached_deposit(1).build());
@@ -404,15 +410,20 @@ mod tests {
             vec![30],
             None,
         ));
-
     }
 
     fn init_tokens(contract: &mut ExampleMTContract) -> (Token, Token) {
         let quote_token_md = create_token_md("PYC".into(), "Python token".into());
         let base_token_md = create_token_md("ABC".into(), "Alphabet token".into());
 
-        let quote_token = contract.mt_mint(accounts(0), quote_token_md.clone(), 1000);
-        let base_token = contract.mt_mint(accounts(0), base_token_md.clone(), 2000);
+        // emulate storage_deposit
+        contract.tokens.accounts_storage.insert(
+            &accounts(0),
+            &(contract.tokens.storage_balance_bounds().min.0 * 2),
+        );
+
+        let quote_token = contract.mt_mint(accounts(0), quote_token_md.clone(), U128(1000));
+        let base_token = contract.mt_mint(accounts(0), base_token_md.clone(), U128(2000));
 
         (quote_token, base_token)
     }

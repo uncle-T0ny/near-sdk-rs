@@ -4,6 +4,8 @@ use near_sdk::{
 };
 use near_contract_standards::multi_token::{approval::MultiTokenApprovalReceiver, token::TokenId};
 
+pub const ON_MT_TOKEN_APPROVE_MSG: &str = "on_multi_token_approve";
+
 #[near_bindgen]
 #[derive(BorshDeserialize, BorshSerialize, PanicOnDefault)]
 pub struct Contract {}
@@ -36,6 +38,6 @@ impl MultiTokenApprovalReceiver for Contract {
         );
         env::log_str(&msg);
 
-        PromiseOrValue::Value("yeeeeeeeeeeeeeeee".to_string())
+        PromiseOrValue::Value(ON_MT_TOKEN_APPROVE_MSG.to_string())
     }
 }

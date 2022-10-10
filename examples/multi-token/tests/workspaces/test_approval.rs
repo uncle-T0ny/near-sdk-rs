@@ -1,3 +1,4 @@
+use approval_receiver::ON_MT_TOKEN_APPROVE_MSG;
 use near_contract_standards::multi_token::token::Token;
 
 use crate::utils::{helper_mint, init, init_approval_receiver_contract};
@@ -21,8 +22,9 @@ async fn simulate_mt_approval_with_receiver() -> anyhow::Result<()> {
         .gas(300_000_000_000_000)
         .deposit(450000000000000000000)
         .transact()
-        .await?;
-    assert_eq!(res.json::<String>()?, "yeeeeeeeeeeeeeeee".to_string()); // todo: what is yeeeeeeeeeeeeeeee?
+        .await?
+        .json::<String>()?;
+    assert_eq!(res, ON_MT_TOKEN_APPROVE_MSG.to_string());
 
     Ok(())
 }
