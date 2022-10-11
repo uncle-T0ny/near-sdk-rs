@@ -3,7 +3,7 @@ use near_sdk::collections::{LazyOption};
 use near_sdk::json_types::U128;
 use near_sdk::{Promise};
 use near_sdk::{
-    env, near_bindgen, require, AccountId, Balance, BorshStorageKey, PanicOnDefault, PromiseOrValue,
+    env, near_bindgen, require, AccountId, BorshStorageKey, PanicOnDefault, PromiseOrValue,
 };
 use near_contract_standards::multi_token::metadata::MT_METADATA_SPEC;
 use near_contract_standards::multi_token::token::{Token, TokenId};
@@ -310,13 +310,15 @@ mod tests {
 
         let (quote_token, base_token) = init_tokens(&mut contract);
 
+        let owner_id = accounts(0);
 
         // Initially, Account 1 is not approved.
         testing_env!(context.attached_deposit(1).build());
         assert!(!contract.mt_is_approved(
+            owner_id.clone(),
             vec![quote_token.token_id.clone()],
             accounts(1),
-            vec![20],
+            vec![U128(20)],
             None,
         ));
 
@@ -324,7 +326,7 @@ mod tests {
         testing_env!(context.attached_deposit(150000000000000000000).build());
         contract.mt_approve(
             vec![quote_token.token_id.clone()],
-            vec![20],
+            vec![U128(20)],
             accounts(1),
             None,
         );
@@ -332,27 +334,30 @@ mod tests {
         // Account 1 is approved for 20 tokens.
         testing_env!(context.attached_deposit(1).build());
         assert!(contract.mt_is_approved(
+            owner_id.clone(),
             vec![quote_token.token_id.clone()],
             accounts(1),
-            vec![20],
+            vec![U128(20)],
             None,
         ));
 
         // Account 1 is NOT approved for more than 20 tokens.
         testing_env!(context.attached_deposit(1).build());
         assert!(!contract.mt_is_approved(
+            owner_id.clone(),
             vec![quote_token.token_id.clone()],
             accounts(1),
-            vec![21],
+            vec![U128(21)],
             None,
         ));
 
         // Account 1 is NOT approved for the other token.
         testing_env!(context.attached_deposit(1).build());
         assert!(!contract.mt_is_approved(
+            owner_id.clone(),
             vec![base_token.token_id.clone()],
             accounts(1),
-            vec![20],
+            vec![U128(20)],
             None,
         ));
 
@@ -362,9 +367,10 @@ mod tests {
             accounts(1),
         );
         assert!(!contract.mt_is_approved(
+            owner_id.clone(),
             vec![quote_token.token_id.clone()],
             accounts(1),
-            vec![20],
+            vec![U128(20)],
             None,
         ));
 
@@ -372,21 +378,22 @@ mod tests {
         testing_env!(context.attached_deposit(2 * 150000000000000000000).build());
         contract.mt_approve(
             vec![quote_token.token_id.clone(), base_token.token_id.clone()],
-            vec![10, 500],
+            vec![U128(10), U128(500)],
             accounts(1),
             None,
         );
         assert!(contract.mt_is_approved(
+            owner_id.clone(),
             vec![quote_token.token_id.clone(), base_token.token_id.clone()],
             accounts(1),
-            vec![10, 500],
+            vec![U128(10), U128(500)],
             None,
         ));
 
         // Approve a different account
         contract.mt_approve(
             vec![quote_token.token_id.clone()],
-            vec![30],
+            vec![U128(30)],
             accounts(2),
             None,
         );
@@ -399,15 +406,17 @@ mod tests {
 
         // Neither account is still approved
         assert!(!contract.mt_is_approved(
+            owner_id.clone(),
             vec![quote_token.token_id.clone(), base_token.token_id.clone()],
             accounts(1),
-            vec![10, 500],
+            vec![U128(10), U128(500)],
             None,
         ));
         assert!(!contract.mt_is_approved(
+            owner_id.clone(),
             vec![quote_token.token_id.clone()],
             accounts(2),
-            vec![30],
+            vec![U128(30)],
             None,
         ));
     }

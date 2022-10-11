@@ -20,9 +20,9 @@ impl MultiToken {
 
 impl MultiTokenEnumeration for MultiToken {
     fn mt_tokens(&self, from_index: Option<U128>, limit: Option<u64>) -> Vec<Token> {
-        let from_index: u128 = from_index.map(From::from).unwrap_or_default();
+        let start_index: u128 = from_index.map(From::from).unwrap_or_default();
         require!(
-            self.owner_by_id.len() as u128 > from_index,
+            self.owner_by_id.len() as u128 >= start_index,
             "Out of bounds, please use a smaller from_index."
         );
         let limit = limit.map(|v| v as usize).unwrap_or(usize::MAX);
@@ -30,7 +30,7 @@ impl MultiTokenEnumeration for MultiToken {
 
         self.owner_by_id
             .iter()
-            .skip(from_index as usize)
+            .skip(start_index as usize)
             .take(limit as usize)
             .map(|(token_id, owner_id)| self.enum_get_token(owner_id, token_id))
             .collect()

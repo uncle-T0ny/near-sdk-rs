@@ -1,12 +1,6 @@
 use std::{fmt::Display, mem::size_of};
 
-use near_sdk::{env, require, AccountId, Balance, CryptoHash, Promise};
-
-pub fn hash_account_id(account_id: &AccountId) -> CryptoHash {
-    let mut hash = CryptoHash::default();
-    hash.copy_from_slice(&env::sha256(account_id.as_bytes()));
-    hash
-}
+use near_sdk::{env, require, AccountId, Balance, Promise};
 
 pub fn refund_deposit_to_account(storage_used: u64, account_id: AccountId) {
     let required_cost = env::storage_byte_cost() * Balance::from(storage_used);

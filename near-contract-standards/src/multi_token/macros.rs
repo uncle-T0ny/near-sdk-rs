@@ -126,7 +126,7 @@ macro_rules! impl_multi_token_approval {
             fn mt_approve(
                 &mut self,
                 token_ids: Vec<TokenId>,
-                amounts: Vec<Balance>,
+                amounts: Vec<U128>,
                 grantee_id: AccountId,
                 msg: Option<String>,
             ) -> Option<Promise> {
@@ -145,12 +145,13 @@ macro_rules! impl_multi_token_approval {
 
             fn mt_is_approved(
                 &self,
+                owner_id: AccountId,
                 token_ids: Vec<TokenId>,
                 approved_account_id: AccountId,
-                amounts: Vec<Balance>,
+                amounts: Vec<U128>,
                 approval_ids: Option<Vec<u64>>,
             ) -> bool {
-                self.$token.mt_is_approved(token_ids, approved_account_id, amounts, approval_ids)
+                self.$token.mt_is_approved(owner_id, token_ids, approved_account_id, amounts, approval_ids)
             }
         }
     };

@@ -1,7 +1,7 @@
 [package]
 name = "multi-token-wrapper"
 version = "0.1.0"
-authors = ["Near Inc <hello@nearprotocol.com>", "@jriemann"]
+authors = ["Near Inc <hello@nearprotocol.com>", "@jriemann", "doit.rant@gmail.com"]
 edition = "2021"
 
 [dev-dependencies]

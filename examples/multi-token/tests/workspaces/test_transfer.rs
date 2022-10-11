@@ -1,5 +1,6 @@
 #[cfg(test)]
 mod tests {
+    use near_sdk::json_types::U128;
     use near_contract_standards::multi_token::token::Token;
     use near_sdk::ONE_YOCTO;
     use near_units::parse_near;
@@ -27,7 +28,7 @@ mod tests {
         let _ = alice.call(mt.id(), "mt_approve")
             .args_json((
                 [token.token_id.clone()],
-                [50u64],
+                [U128(50)],
                 bob.id(),
                 Option::<String>::None,
             ))
@@ -100,7 +101,7 @@ mod tests {
         let _ = alice.call(mt.id(), "mt_approve")
             .args_json((
                 [token.token_id.clone()],
-                [50u64],
+                [U128(50)],
                 bob.id(),
                 Option::<String>::None,
             ))

@@ -19,6 +19,10 @@ use crate::multi_token::utils::{
 pub const GAS_FOR_RESOLVE_TRANSFER: Gas = Gas(15_000_000_000_000);
 pub const GAS_FOR_MT_TRANSFER_CALL: Gas = Gas(50_000_000_000_000 + GAS_FOR_RESOLVE_TRANSFER.0);
 
+const ERR_MORE_GAS_REQUIRED: &str = "More gas is required";
+const ERR_TOTAL_SUPPLY_OVERFLOW: &str = "Total supply overflow";
+const ERR_PREPAID_GAS_OVERFLOW: &str = "Prepaid gas overflow";
+
 /// Implementation of the multi-token standard
 /// Allows to include NEP-245 compatible tokens to any contract.
 /// There are next traits that any contract may implement:
@@ -126,13 +130,13 @@ impl MultiToken {
             storage_usage_per_token: 0,
         };
 
-        this.measure_account_storage_usage();
-        this.measure_account_storage_usage_per_token();
+        this.measure_min_account_storage_cost();
+        this.measure_min_token_storage_cost();
 
         this
     }
 
-    fn measure_account_storage_usage_per_token(&mut self) {
+    fn measure_min_token_storage_cost(&mut self) {
         let tmp_token_id = u64::MAX.to_string();
         let mut user_token_balance = LookupMap::new(
             StorageKey::BalancesInner { token_id: env::sha256(tmp_token_id.as_bytes()) }
@@ -143,14 +147,13 @@ impl MultiToken {
 
         user_token_balance.insert(&tmp_account_id, &u128::MAX);
 
-        // todo: add tokens_per_owner
         self.balances_per_token.insert(&tmp_token_id, &user_token_balance);
         self.storage_usage_per_token = env::storage_usage() - initial_storage_usage;
 
         self.balances_per_token.remove(&tmp_token_id);
     }
 
-    fn measure_account_storage_usage(&mut self) {
+    fn measure_min_account_storage_cost(&mut self) {
         let tmp_account_id = AccountId::new_unchecked("a".repeat(64));
         let initial_storage_usage = env::storage_usage();
 
@@ -194,7 +197,7 @@ impl MultiToken {
                     .get(token_id)
                     .unwrap()
                     .checked_add(amount)
-                    .unwrap_or_else(|| env::panic_str("Total supply overflow")),
+                    .unwrap_or_else(|| env::panic_str(ERR_TOTAL_SUPPLY_OVERFLOW)),
             );
         } else {
             env::panic_str("Balance overflow");
@@ -219,7 +222,7 @@ impl MultiToken {
                     .get(token_id)
                     .unwrap()
                     .checked_sub(amount)
-                    .unwrap_or_else(|| env::panic_str("Total supply overflow")),
+                    .unwrap_or_else(|| env::panic_str(ERR_TOTAL_SUPPLY_OVERFLOW)),
             );
         } else {
             env::panic_str("The account doesn't have enough balance");
@@ -294,12 +297,6 @@ impl MultiToken {
         (sender_id.to_owned(), old_approvals)
     }
 
-    pub fn internal_register_account(&mut self, token_id: &TokenId, account_id: &AccountId) {
-        if self.balances_per_token.get(token_id).unwrap().insert(account_id, &0).is_some() {
-            env::panic_str("The account is already registered");
-        }
-    }
-
     pub fn internal_mint(
         &mut self,
         owner_id: AccountId,
@@ -340,7 +337,6 @@ impl MultiToken {
         if self.token_metadata_by_id.is_some() && token_metadata.is_none() {
             env::panic_str("MUST provide metadata");
         }
-
         // Increment next id of the token. Panic if it's overflowing u64::MAX
         self.next_token_id =
             self.next_token_id.checked_add(1).expect("u64 overflow, cannot mint any more tokens");
@@ -357,12 +353,12 @@ impl MultiToken {
         self.owner_by_id.insert(&token_id, &owner_id);
 
         // Insert new metadata
-        self.token_metadata_by_id // todo: we insert metadata even if it's None?
+        self.token_metadata_by_id
             .as_mut()
             .and_then(|by_id| by_id.insert(&token_id, &token_metadata.clone().unwrap()));
 
         // Insert new supply
-        let supply = supply.unwrap_or(0); // todo: supply by default is 0? Is it correct?
+        let supply = supply.unwrap_or(0);
         self.total_supply.insert(&token_id, &supply);
 
         // Insert new balance
@@ -492,10 +488,7 @@ impl MultiTokenCore for MultiToken {
         msg: String,
     ) -> PromiseOrValue<U128> {
         assert_one_yocto();
-        require!(
-            env::prepaid_gas() > GAS_FOR_MT_TRANSFER_CALL + GAS_FOR_RESOLVE_TRANSFER,
-            "Insufficient gas for transfer"
-        );
+        require!(env::prepaid_gas() > GAS_FOR_MT_TRANSFER_CALL, ERR_MORE_GAS_REQUIRED);
         let sender_id = env::predecessor_account_id();
 
         let amount_to_send: Balance = amount.0;
@@ -506,7 +499,7 @@ impl MultiTokenCore for MultiToken {
         let receiver_gas = env::prepaid_gas()
             .0
             .checked_sub(GAS_FOR_MT_TRANSFER_CALL.0)
-            .unwrap_or_else(|| env::panic_str("Prepaid gas overflow"));
+            .unwrap_or_else(|| env::panic_str(ERR_PREPAID_GAS_OVERFLOW));
 
         ext_mt_receiver::ext(receiver_id.clone())
             .with_static_gas(receiver_gas.into())
@@ -540,10 +533,7 @@ impl MultiTokenCore for MultiToken {
         msg: String,
     ) -> PromiseOrValue<Vec<U128>> {
         assert_one_yocto();
-        require!(
-            env::prepaid_gas() > GAS_FOR_MT_TRANSFER_CALL + GAS_FOR_RESOLVE_TRANSFER,
-            "Insufficient gas for transfer"
-        );
+        require!(env::prepaid_gas() > GAS_FOR_MT_TRANSFER_CALL, ERR_MORE_GAS_REQUIRED);
         let sender_id = env::predecessor_account_id();
 
         let amounts_to_send: Vec<Balance> = amounts.iter().map(|x| x.0).collect();
@@ -559,7 +549,7 @@ impl MultiTokenCore for MultiToken {
         let receiver_gas = env::prepaid_gas()
             .0
             .checked_sub(GAS_FOR_MT_TRANSFER_CALL.into())
-            .unwrap_or_else(|| env::panic_str("Prepaid gas overflow"));
+            .unwrap_or_else(|| env::panic_str(ERR_PREPAID_GAS_OVERFLOW));
 
         ext_mt_receiver::ext(receiver_id.clone())
             .with_static_gas(receiver_gas.into())
@@ -683,9 +673,9 @@ impl MultiToken {
         receiver: AccountId,
         token_id: TokenId,
         amount: u128,
-        to_refund: u128,
+        unused_amount: u128,
     ) -> Balance {
-        if to_refund > 0 {
+        if unused_amount > 0 {
             // Whatever was unused gets returned to the original owner.
             let mut balances = self.balances_per_token.get(&token_id).unwrap();
             let receiver_balance = balances.get(&receiver).unwrap_or(0);
@@ -693,18 +683,43 @@ impl MultiToken {
             if receiver_balance > 0 {
                 // If the receiver doesn't have enough funds to do the
                 // full refund, just refund all that we can.
-                let refund = std::cmp::min(receiver_balance, to_refund);
-                balances.insert(&receiver, &(receiver_balance - refund));
+                let refund_amount = std::cmp::min(receiver_balance, unused_amount);
+
+                if let Some(new_receiver_balance) = receiver_balance.checked_sub(refund_amount) {
+                    balances.insert(&receiver, &new_receiver_balance);
+                } else {
+                    env::panic_str("The receiver account doesn't have enough balance");
+                }
 
                 // Try to give the refund back to sender now
                 return if let Some(sender_balance) = balances.get(sender_id) {
-                    balances.insert(sender_id, &(sender_balance + refund));
-                    log!("Refund {} from {} to {}", refund, receiver, sender_id);
-                    amount - refund
+                    if let Some(new_sender_balance) = sender_balance.checked_add(refund_amount) {
+                        balances.insert(sender_id, &new_sender_balance);
+                        log!("Refund {} from {} to {}", refund_amount, receiver, sender_id);
+                        MtTransfer {
+                            old_owner_id: sender_id,
+                            new_owner_id: &receiver,
+                            token_ids: &[&token_id],
+                            amounts: &[&amount.to_string()],
+                            authorized_id: None,
+                            memo: None,
+                        }
+                            .emit();
+                        amount - refund_amount
+                    } else {
+                        env::panic_str("Sender balance overflow");
+                    }
                 } else {
-                    *self.total_supply.get(&token_id).as_mut().unwrap() -= refund;
+                    self
+                        .total_supply
+                        .get(&token_id)
+                        .as_mut()
+                        .unwrap()
+                        .checked_sub(refund_amount)
+                        .unwrap_or_else(|| env::panic_str(ERR_TOTAL_SUPPLY_OVERFLOW));
+
                     log!("The account of the sender was deleted");
-                    amount - refund
+                    amount - refund_amount
                 };
             }
         }

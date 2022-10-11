@@ -1,3 +1,4 @@
+use near_sdk::json_types::U128;
 use approval_receiver::ON_MT_TOKEN_APPROVE_MSG;
 use near_contract_standards::multi_token::token::Token;
 
@@ -15,7 +16,7 @@ async fn simulate_mt_approval_with_receiver() -> anyhow::Result<()> {
     let res = alice.call(mt.id(), "mt_approve")
         .args_json((
             [token.token_id.clone()],
-            [50u64],
+            [U128(50)],
             approval_receiver.id(),
             Option::<String>::Some("some-msg".to_string()),
         ))

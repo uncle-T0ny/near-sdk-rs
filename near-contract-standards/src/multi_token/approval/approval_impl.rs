@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 
-use near_sdk::{AccountId, assert_one_yocto, Balance, env, Gas, Promise, require};
+use near_sdk::{AccountId, assert_one_yocto, env, Gas, Promise, require, json_types::U128};
 
 use crate::multi_token::{
-    core::{GAS_FOR_MT_TRANSFER_CALL, MultiToken},
+    core::{MultiToken},
     token::{Approval, TokenId},
     utils::{bytes_for_approved_account_id, Entity, expect_approval, refund_deposit},
 };
@@ -11,11 +11,14 @@ use crate::multi_token::approval::receiver::{ext_approval_receiver};
 
 use super::MultiTokenApproval;
 
+pub const GAS_FOR_RESOLVE_APPROVE: Gas = Gas(15_000_000_000_000);
+pub const GAS_FOR_MT_APPROVE_CALL: Gas = Gas(50_000_000_000_000 + GAS_FOR_RESOLVE_APPROVE.0);
+
 impl MultiTokenApproval for MultiToken {
     fn mt_approve(
         &mut self,
         token_ids: Vec<TokenId>,
-        amounts: Vec<Balance>, // todo: Balance raplace with U128
+        amounts: Vec<U128>,
         grantee_id: AccountId,
         msg: Option<String>,
     ) -> Option<Promise> {
@@ -39,12 +42,12 @@ impl MultiTokenApproval for MultiToken {
             // Get the balance to check if user has enough tokens
             let approver_balance =
                 self.balances_per_token.get(token_id).unwrap().get(&approver_id).unwrap_or(0);
-            require!(approver_balance >= amount, "Not enough balance to approve");
+            require!(approver_balance >= amount.0, "Not enough balance to approve");
 
             // Get the next approval id for the token
             let new_approval_id: u64 =
                 expect_approval(next_id_by_token.get(token_id), Entity::Token);
-            let new_approval = Approval { amount, approval_id: new_approval_id };
+            let new_approval = Approval { amount: amount.into(), approval_id: new_approval_id };
             env::log_str(format!("New approval: {:?}", new_approval).as_str());
 
             // Get existing approvals for this token. If one exists for the grantee_id, overwrite it.
@@ -73,11 +76,10 @@ impl MultiTokenApproval for MultiToken {
         // if given `msg`, schedule call to `mt_on_approve` and return it. Else, return None.
         let receiver_gas: Gas = env::prepaid_gas()
             .0
-            .checked_sub(GAS_FOR_MT_TRANSFER_CALL.into()) // todo: change to ga for approve
+            .checked_sub(GAS_FOR_MT_APPROVE_CALL.into())
             .unwrap_or_else(|| env::panic_str("Prepaid gas overflow"))
             .into();
 
-        // todo: check if msg is empty but not None
         msg.map(|msg| {
             ext_approval_receiver::ext(grantee_id)
                 .with_static_gas(receiver_gas)
@@ -132,9 +134,10 @@ impl MultiTokenApproval for MultiToken {
 
     fn mt_is_approved(
         &self,
+        owner_id: AccountId,
         token_ids: Vec<TokenId>,
         approved_account_id: AccountId,
-        amounts: Vec<Balance>,
+        amounts: Vec<U128>,
         approval_ids: Option<Vec<u64>>,
     ) -> bool {
         let approval_ids = approval_ids.unwrap_or_default();
@@ -143,8 +146,6 @@ impl MultiTokenApproval for MultiToken {
             "token_ids and approval_ids must have equal size"
         );
 
-        // todo: should be a view function, we need to add a parametr owner_id
-        let owner_id = env::predecessor_account_id();
         let by_token = expect_approval(self.approvals_by_token_id.as_ref(), Entity::Contract);
 
         for i in 0..token_ids.len() {
@@ -162,7 +163,7 @@ impl MultiTokenApproval for MultiToken {
                 None => return false,
             };
 
-            if !approval.amount.eq(&amount) {
+            if !approval.amount.eq(&amount.into()) {
                 return false;
             }
 
