@@ -20,7 +20,7 @@ async fn simulate_mt_approval_with_receiver() -> anyhow::Result<()> {
             approval_receiver.id(),
             Option::<String>::Some("some-msg".to_string()),
         ))
-        .gas(300_000_000_000_000)
+        .max_gas()
         .deposit(450000000000000000000)
         .transact()
         .await?

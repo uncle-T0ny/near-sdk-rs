@@ -5,6 +5,13 @@ use near_contract_standards::multi_token::{
 };
 use near_contract_standards::multi_token::token::{Token};
 use near_sdk::{Balance};
+use near_contract_standards::storage_management::StorageBalanceBounds;
+
+pub async fn get_storage_balance_bounds(contract: &Contract) -> anyhow::Result<StorageBalanceBounds> {
+    Ok(contract.view("storage_balance_bounds", vec![])
+        .await?
+        .json::<StorageBalanceBounds>()?)
+}
 
 pub async fn register_user_for_token(
     contract: &Contract,
@@ -16,7 +23,7 @@ pub async fn register_user_for_token(
             account_id,
             Some(false),
         ))
-        .gas(300_000_000_000_000)
+        .max_gas()
         .deposit(deposit)
         .transact()
         .await?;
@@ -48,7 +55,7 @@ pub async fn helper_mint(
     let res = mt_contract
         .call("mt_mint")
         .args_json((owner_id, token_md, amount.to_string()))
-        .gas(300_000_000_000_000)
+        .max_gas()
         .deposit(parse_near!("7 mN"))
         .transact()
         .await?;
@@ -69,7 +76,7 @@ pub async fn init(
     let res = mt_contract
         .call("new_default_meta")
         .args_json((mt_contract.id(),))
-        .gas(300_000_000_000_000)
+        .max_gas()
         .transact()
         .await?;
     
@@ -80,7 +87,7 @@ pub async fn init(
     let res = defi_contract
         .call("new")
         .args_json((mt_contract.id(),))
-        .gas(300_000_000_000_000)
+        .max_gas()
         .transact()
         .await?;
     assert!(res.is_success());
@@ -108,7 +115,7 @@ pub async fn init_approval_receiver_contract(worker: &Worker<impl DevNetwork>) -
     let approval_receiver_contract = worker.dev_deploy(include_bytes!("../../res/approval_receiver.wasm")).await?;
     let res = approval_receiver_contract
         .call("new")
-        .gas(300_000_000_000_000)
+        .max_gas()
         .transact()
         .await?;
     assert!(res.is_success());
