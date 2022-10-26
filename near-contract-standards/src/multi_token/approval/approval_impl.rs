@@ -5,7 +5,7 @@ use near_sdk::{AccountId, assert_one_yocto, env, Gas, Promise, require, json_typ
 use crate::multi_token::{
     core::{MultiToken},
     token::{Approval, TokenId},
-    utils::{bytes_for_approved_account_id, Entity, expect_approval, refund_deposit},
+    utils::{bytes_for_approved_account_id, Entity, expect_approval, expect_approval_for_token, refund_deposit},
 };
 use crate::multi_token::approval::receiver::{ext_approval_receiver};
 
@@ -46,7 +46,7 @@ impl MultiTokenApproval for MultiToken {
 
             // Get the next approval id for the token
             let new_approval_id: u64 =
-                expect_approval(next_id_by_token.get(token_id), Entity::Token);
+                expect_approval_for_token(next_id_by_token.get(token_id), token_id);
             let new_approval = Approval { amount: amount.into(), approval_id: new_approval_id };
             env::log_str(format!("New approval: {:?}", new_approval).as_str());
 
@@ -101,7 +101,7 @@ impl MultiTokenApproval for MultiToken {
 
         for token_id in token_ids.iter() {
             // Remove approval for user & also clean maps to save space it it's empty
-            let mut by_owner = expect_approval(by_token.get(token_id), Entity::Token);
+            let mut by_owner = expect_approval_for_token(by_token.get(token_id), token_id);
             let by_grantee = by_owner.get_mut(&owner_id);
 
             if let Some(grantee_to_approval) = by_grantee {
@@ -126,7 +126,7 @@ impl MultiTokenApproval for MultiToken {
         let by_token = expect_approval(self.approvals_by_token_id.as_mut(), Entity::Contract);
 
         for token_id in token_ids.iter() {
-            let mut by_owner = expect_approval(by_token.get(token_id), Entity::Token);
+            let mut by_owner = expect_approval_for_token(by_token.get(token_id), token_id);
             by_owner.remove(&owner_id);
             by_token.insert(token_id, &by_owner);
         }

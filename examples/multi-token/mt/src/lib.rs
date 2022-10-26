@@ -182,6 +182,28 @@ mod tests {
     }
 
     #[test]
+    #[should_panic(expected = "No approvals for token 1")]
+    fn test_transfer_no_approvals_for_account() {
+        let mut context = VMContextBuilder::new();
+        set_caller(&mut context, 0);
+        let mut contract = ExampleMTContract::new_default_meta(accounts(0));
+        let (token, _) = init_tokens(&mut contract);
+        contract.tokens.accounts_storage.insert(
+            &accounts(1),
+            &contract.tokens.storage_balance_bounds().min.into(),
+        );
+
+        testing_env!(context.attached_deposit(1).build());
+        contract.mt_transfer(
+            accounts(1),
+            token.token_id.clone(),
+            U128(1),
+            Some((accounts(0), 1)),
+            None
+        )
+    }
+
+    #[test]
     #[should_panic(expected = "The account doesn't have enough balance")]
     fn test_sender_account_must_have_sufficient_balance() {
         let mut context = VMContextBuilder::new();

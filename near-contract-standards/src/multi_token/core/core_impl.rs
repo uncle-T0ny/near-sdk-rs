@@ -13,7 +13,7 @@ use crate::multi_token::events::{MtMint, MtTransfer};
 use crate::multi_token::metadata::TokenMetadata;
 use crate::multi_token::token::{Approval, ApprovalContainer, ClearedApproval, Token, TokenId};
 use crate::multi_token::utils::{
-    Entity, expect_approval, refund_deposit_to_account,
+    Entity, expect_approval, expect_approval_for_token, refund_deposit_to_account,
 };
 
 pub const GAS_FOR_RESOLVE_TRANSFER: Gas = Gas(15_000_000_000_000);
@@ -399,7 +399,7 @@ impl MultiToken {
         // If an approval was provided, ensure it meets requirements.
         let approvals = expect_approval(self.approvals_by_token_id.as_mut(), Entity::Contract);
 
-        let mut by_owner = expect_approval(approvals.get(token_id), Entity::Token);
+        let mut by_owner = expect_approval_for_token(approvals.get(token_id), token_id);
 
         let mut by_sender_id = by_owner
             .get(owner_id)
